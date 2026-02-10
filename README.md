@@ -98,8 +98,8 @@ Um aplicativo mobile completo para gestão financeira pessoal e empresarial, com
 
 ```bash
 # 1. Clone o repositório
-git clone https://github.com/seu-usuario/finance-manager-pro.git
-cd finance-manager-pro
+git clone https://github.com/lumaXs/FinanceManager.git
+cd FinanceManager
 
 # 2. Instale as dependências
 npm install
