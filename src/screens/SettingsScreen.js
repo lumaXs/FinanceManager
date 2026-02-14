@@ -3,7 +3,7 @@
  * Tela de configurações e opções do aplicativo
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     View,
     Text,
@@ -13,8 +13,14 @@ import {
     Switch,
     Alert,
     ActivityIndicator,
+    Platform,
+    Linking,
+    Share,
 } from 'react-native';
 import { FontAwesome5 } from '@expo/vector-icons';
+import * as LocalAuthentication from 'expo-local-authentication';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 
 import { ScreenContainer } from '../components/ScreenContainer';
 import { ACCOUNT_TYPES } from '../constants';
@@ -26,9 +32,56 @@ export function SettingsScreen() {
     const [accountType, setAccountType] = useState(ACCOUNT_TYPES.PERSONAL);
     const [notifications, setNotifications] = useState(true);
     const [biometry, setBiometry] = useState(false);
+    const [biometryAvailable, setBiometryAvailable] = useState(false);
+    const [loadingSettings, setLoadingSettings] = useState(true);
 
-    // Aguardar carregamento do tema
-    if (isLoading) {
+    // Carregar configurações salvas
+    useEffect(() => {
+        loadSettings();
+        checkBiometry();
+    }, []);
+
+    const checkBiometry = async () => {
+        try {
+            const compatible = await LocalAuthentication.hasHardwareAsync();
+            const enrolled = await LocalAuthentication.isEnrolledAsync();
+            setBiometryAvailable(compatible && enrolled);
+        } catch (error) {
+            console.log('Erro ao verificar biometria:', error);
+            setBiometryAvailable(false);
+        }
+    };
+
+    const loadSettings = async () => {
+        try {
+            setLoadingSettings(true);
+
+            // Carregar tipo de conta
+            const savedAccountType = await storageService.getAccountType();
+            if (savedAccountType) {
+                setAccountType(savedAccountType);
+            }
+
+            // Carregar configuração de notificações
+            const savedNotifications = await storageService.get('settings_notifications');
+            if (savedNotifications !== null) {
+                setNotifications(savedNotifications === 'true');
+            }
+
+            // Carregar configuração de biometria
+            const savedBiometry = await storageService.get('settings_biometry');
+            if (savedBiometry !== null) {
+                setBiometry(savedBiometry === 'true');
+            }
+        } catch (error) {
+            console.log('Erro ao carregar configurações:', error);
+        } finally {
+            setLoadingSettings(false);
+        }
+    };
+
+    // Aguardar carregamento do tema e configurações
+    if (isLoading || loadingSettings) {
         return (
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
                 <ActivityIndicator size="large" color="#00D4FF" />
@@ -58,22 +111,98 @@ export function SettingsScreen() {
         );
     };
 
+    const handleNotificationsToggle = async (value) => {
+        setNotifications(value);
+        await storageService.set('settings_notifications', value.toString());
+
+        if (value) {
+            Alert.alert(
+                'Notificações Ativadas',
+                'Você receberá lembretes sobre suas transações e metas.'
+            );
+        }
+    };
+
+    const handleBiometryToggle = async (value) => {
+        if (value && !biometryAvailable) {
+            Alert.alert(
+                'Biometria Indisponível',
+                'Seu dispositivo não possui biometria configurada ou não é compatível.'
+            );
+            return;
+        }
+
+        if (value) {
+            // Testar autenticação antes de ativar
+            try {
+                const result = await LocalAuthentication.authenticateAsync({
+                    promptMessage: 'Autentique para ativar a proteção biométrica',
+                    fallbackLabel: 'Usar senha',
+                    cancelLabel: 'Cancelar',
+                });
+
+                if (result.success) {
+                    setBiometry(true);
+                    await storageService.set('settings_biometry', 'true');
+                    Alert.alert(
+                        'Biometria Ativada',
+                        'O app agora está protegido com biometria.'
+                    );
+                } else {
+                    Alert.alert('Autenticação Cancelada', 'A biometria não foi ativada.');
+                }
+            } catch (error) {
+                console.log('Erro na autenticação:', error);
+                Alert.alert('Erro', 'Não foi possível ativar a biometria.');
+            }
+        } else {
+            setBiometry(false);
+            await storageService.set('settings_biometry', 'false');
+            Alert.alert('Biometria Desativada', 'A proteção biométrica foi removida.');
+        }
+    };
+
     const handleExportData = async () => {
         Alert.alert(
             'Exportar Dados',
-            'Deseja exportar todas as suas transações?',
+            'Deseja exportar todas as suas transações em formato JSON?',
             [
                 { text: 'Cancelar', style: 'cancel' },
                 {
                     text: 'Exportar',
                     onPress: async () => {
                         try {
+                            // Mostrar loading
+                            Alert.alert('Exportando...', 'Preparando seus dados...');
+
+                            // Pegar todos os dados
                             const data = await storageService.exportData();
-                            Alert.alert(
-                                'Sucesso',
-                                'Dados exportados! Em breve teremos compartilhamento.'
+
+                            // Criar arquivo JSON
+                            const fileName = `finance-manager-backup-${new Date().toISOString().split('T')[0]}.json`;
+                            const fileUri = FileSystem.documentDirectory + fileName;
+
+                            await FileSystem.writeAsStringAsync(
+                                fileUri,
+                                JSON.stringify(data, null, 2)
                             );
+
+                            // Verificar se pode compartilhar
+                            const canShare = await Sharing.isAvailableAsync();
+
+                            if (canShare) {
+                                await Sharing.shareAsync(fileUri, {
+                                    mimeType: 'application/json',
+                                    dialogTitle: 'Exportar dados do Finance Manager',
+                                });
+                            } else {
+                                Alert.alert(
+                                    'Dados Exportados',
+                                    `Arquivo salvo em: ${fileUri}`
+                                );
+                            }
                         } catch (error) {
+                            console.log('Erro ao exportar:', error);
                             Alert.alert('Erro', 'Não foi possível exportar os dados');
                         }
                     },
@@ -94,12 +223,65 @@ export function SettingsScreen() {
                     onPress: async () => {
                         try {
                             await storageService.clearAll();
-                            Alert.alert('Sucesso', 'Todos os dados foram removidos');
+                            Alert.alert(
+                                'Sucesso',
+                                'Todos os dados foram removidos. O app será reiniciado.',
+                                [
+                                    {
+                                        text: 'OK',
+                                        onPress: () => {
+                                            // Recarregar as configurações
+                                            loadSettings();
+                                        }
+                                    }
+                                ]
+                            );
                         } catch (error) {
                             Alert.alert('Erro', 'Não foi possível limpar os dados');
                         }
                     },
                 },
+            ]
+        );
+    };
+
+    const handleOpenGitHub = () => {
+        Alert.alert(
+            'Finance Manager',
+            'Este é um projeto open source. Quer ver o código no GitHub?',
+            [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                    text: 'Abrir GitHub',
+                    onPress: () => {
+                        Linking.openURL('https://github.com/lumaXs/FinanceManager');
+                    }
+                }
+            ]
+        );
+    };
+
+    const handleRateApp = () => {
+        const storeUrl = Platform.select({
+            ios: 'https://apps.apple.com/app/id123456789', // Substituir com ID real
+            android: 'https://play.google.com/store/apps/details?id=com.financemanager', // Substituir com ID real
+        });
+
+        Alert.alert(
+            'Avaliar App',
+            'Sua avaliação é muito importante para nós! Deseja avaliar o Finance Manager?',
+            [
+                { text: 'Mais Tarde', style: 'cancel' },
+                {
+                    text: 'Avaliar',
+                    onPress: () => {
+                        if (storeUrl) {
+                            Linking.openURL(storeUrl);
+                        } else {
+                            Alert.alert('Em breve!', 'O app ainda não está publicado nas lojas.');
+                        }
+                    }
+                }
             ]
         );
     };
@@ -253,11 +435,11 @@ export function SettingsScreen() {
                         {renderOption(
                             'bell',
                             'Notificações',
-                            'Receber lembretes e alertas',
+                            notifications ? 'Ativadas' : 'Desativadas',
                             null,
                             <Switch
                                 value={notifications}
-                                onValueChange={setNotifications}
+                                onValueChange={handleNotificationsToggle}
                                 trackColor={{ false: safeTheme.textMuted, true: safeTheme.primary }}
                                 thumbColor={safeTheme.white}
                             />
@@ -265,11 +447,12 @@ export function SettingsScreen() {
                         {renderOption(
                             'fingerprint',
                             'Biometria',
-                            'Proteger com digital ou Face ID',
+                            biometry ? 'Protegido' : biometryAvailable ? 'Desativado' : 'Indisponível',
                             null,
                             <Switch
                                 value={biometry}
-                                onValueChange={setBiometry}
+                                onValueChange={handleBiometryToggle}
+                                disabled={!biometryAvailable}
                                 trackColor={{ false: safeTheme.textMuted, true: safeTheme.primary }}
                                 thumbColor={safeTheme.white}
                             />
@@ -301,8 +484,8 @@ export function SettingsScreen() {
                     'Sobre',
                     <>
                         {renderOption('info-circle', 'Versão', '2.0.0', null, null)}
-                        {renderOption('github', 'Open Source', 'Veja no GitHub', () => { })}
-                        {renderOption('heart', 'Avaliar App', 'Deixe sua avaliação', () => { })}
+                        {renderOption('github', 'Open Source', 'Veja no GitHub', handleOpenGitHub)}
+                        {renderOption('heart', 'Avaliar App', 'Deixe sua avaliação', handleRateApp)}
                     </>
                 )}
 
