@@ -19,15 +19,12 @@ Um aplicativo mobile completo para gestão financeira pessoal e empresarial, com
 
 ## 📱 Screenshots
 
-```
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│   Dashboard     │  │   Transações    │  │  Categorias     │
-│                 │  │                 │  │                 │
-│  💰 Saldo       │  │  📋 Lista       │  │  🏷️ Gestão      │
-│  📈 Gráficos    │  │  🔍 Filtros     │  │  ➕ Criar       │
-│  📊 Análises    │  │  ✏️  Editar      │  │  🎨 Cores       │
-└─────────────────┘  └─────────────────┘  └─────────────────┘
-```
+<div align="center">
+    <img src="./assets/01-homepage.png" whidt="220" />
+    <img src="./assets/02-transaction-page.png" whidt="220" />
+    <img src="./assets/03-categories-page.png" whidt="220" />
+    <img src="./assets/04-settings-page.png" whidt="220" />
+</div>
 
 ## ✨ Features
 
